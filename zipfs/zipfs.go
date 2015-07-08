@@ -14,7 +14,8 @@ import (
 	"strings"
 )
 
-var commentPattern = regexp.MustCompile(`zipfs:(\S+)\s+(\S+)`)
+var commentPattern = regexp.MustCompile(`zipfs:(\S+)\s+(\S+)((?:\s+-x\s*\S+)*)`)
+var excludePattern = regexp.MustCompile(`-x\s*(\S+)`)
 
 func main() {
 	var sourceDir string
@@ -35,6 +36,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if hasZipData(exePath) {
+		fmt.Fprintf(os.Stderr, "ERROR: Executable file \"%s\" already has zipped resource data appended\n", exePath)
+		os.Exit(1)
+	}
+
 	sourceDir = getSourceDir(sourceDir)
 	parseTree(sourceDir, exePath)
 }
@@ -43,10 +49,9 @@ func getSourceDir(srcDir string) string {
 	if srcDir != "" {
 		if _, err := os.Stat(srcDir); err == nil {
 			return srcDir
-		} else {
-			fmt.Fprintf(os.Stderr, "ERROR: %s does not exist\n", srcDir)
-			os.Exit(1)
 		}
+		fmt.Fprintf(os.Stderr, "ERROR: %s does not exist\n", srcDir)
+		os.Exit(1)
 	}
 
 	binDir := filepath.Dir(os.Args[0])
@@ -100,16 +105,27 @@ func handleComment(comment string, filePath string, exePath string) {
 	matches := commentPattern.FindStringSubmatch(comment)
 	if matches != nil {
 		collectionName := matches[1]
+		wd, _ := os.Getwd()
 		dataDir := filepath.Join(filepath.Dir(filePath), matches[2])
+		dataDir2 := filepath.Join(wd, matches[2])
+
 		if _, err := os.Stat(dataDir); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: Directory \"%s\" does not exist\n", dataDir)
-			os.Exit(1)
+			if _, err := os.Stat(dataDir2); err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: Neither the directory \"%s\" nor \"%s\" does exist\n", dataDir, dataDir2)
+				os.Exit(1)
+			}
+			dataDir = dataDir2
 		}
 
-		title := fmt.Sprintf("Collection \"%s\"", collectionName)
-		fmt.Println(title + "\n" + strings.Repeat("-", len(title)))
+		var excludes []string
+		excludeMatches := excludePattern.FindAllStringSubmatch(matches[3], -1)
+		for _, match := range excludeMatches {
+			excludes = append(excludes, match[1])
+		}
 
-		err := appendZipData(exePath, collectionName, dataDir)
+		fmt.Printf("Collection \"%s\":\n", collectionName)
+
+		err := appendZipData(exePath, collectionName, dataDir, excludes)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: Could not append zip data: %s\n", err)
 			os.Exit(1)
@@ -118,7 +134,20 @@ func handleComment(comment string, filePath string, exePath string) {
 	}
 }
 
-func appendZipData(exePath string, collectionName string, dataDir string) error {
+func hasZipData(exePath string) bool {
+	file, err := os.Open(exePath)
+	if err != nil {
+		return false
+	}
+
+	data := make([]byte, 4)
+	file.Seek(-8, os.SEEK_END)
+	file.Read(data)
+
+	return string(data) == "ZIPR"
+}
+
+func appendZipData(exePath string, collectionName string, dataDir string, excludes []string) error {
 	dataDir, err := filepath.Abs(dataDir)
 	if err != nil {
 		return err
@@ -138,7 +167,7 @@ func appendZipData(exePath string, collectionName string, dataDir string) error 
 	file.WriteString(collectionName)
 	file.Write([]byte{0})
 
-	zip := zip.NewWriter(file)
+	zipWriter := zip.NewWriter(file)
 
 	err = filepath.Walk(dataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -146,23 +175,44 @@ func appendZipData(exePath string, collectionName string, dataDir string) error 
 		}
 
 		if !info.IsDir() {
+			stat, err := os.Stat(path)
+			if err != nil {
+				return err
+			}
+
 			relPath := strings.TrimLeft(strings.TrimPrefix(path, dataDir), "/")
-			fmt.Println(relPath)
-
-			reader, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer reader.Close()
-
-			writer, err := zip.Create(relPath)
-			if err != nil {
-				return err
+			include := true
+			for _, exclude := range excludes {
+				if exclude[0] == '/' && strings.HasPrefix(relPath, exclude[1:]) || strings.Contains(relPath, exclude) {
+					include = false
+					break
+				}
 			}
 
-			_, err = io.Copy(writer, reader)
-			if err != nil {
-				return err
+			if include {
+				fmt.Println("- " + relPath)
+
+				reader, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer reader.Close()
+
+				header, err := zip.FileInfoHeader(stat)
+				if err != nil {
+					return err
+				}
+				header.Name = relPath
+
+				writer, err := zipWriter.CreateHeader(header)
+				if err != nil {
+					return err
+				}
+
+				_, err = io.Copy(writer, reader)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
@@ -170,11 +220,11 @@ func appendZipData(exePath string, collectionName string, dataDir string) error 
 	})
 
 	if err != nil {
-		zip.Close()
+		zipWriter.Close()
 		return err
 	}
 
-	zip.Close()
+	zipWriter.Close()
 	file.WriteString("ZIPR")
 	binary.Write(file, binary.BigEndian, int32(offset))
 

@@ -11,7 +11,12 @@ import (
 	"time"
 )
 
-func New(name string, dir string) *gatewayFS {
+// New creates a new zip file system. The specified name must correspond
+// to a name used in a zipfs: comment. If the zipfs command has already
+// been run on the executable, the zipped data is being read from there,
+// otherwise (e.g. during development) it is being read from the specified
+// directory.
+func New(name string, dir string) http.FileSystem {
 	return &gatewayFS{
 		name: name,
 		dir:  dir,
@@ -156,7 +161,7 @@ func (f *zipFile) Read(p []byte) (n int, err error) {
 }
 
 func (f *zipFile) Readdir(count int) ([]os.FileInfo, error) {
-	list := make([]os.FileInfo, 0)
+	var list []os.FileInfo
 	return list, nil
 }
 
