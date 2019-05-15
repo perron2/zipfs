@@ -32,12 +32,12 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	} else if _, err := os.Stat(exePath); err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: Executable file \"%s\" does not exist\n", exePath)
+		_, _ = fmt.Fprintf(os.Stderr, "ERROR: Executable file \"%s\" does not exist\n", exePath)
 		os.Exit(1)
 	}
 
 	if hasZipData(exePath) {
-		fmt.Fprintf(os.Stderr, "ERROR: Executable file \"%s\" already has zipped resource data appended\n", exePath)
+		_, _ = fmt.Fprintf(os.Stderr, "ERROR: Executable file \"%s\" already has zipped resource data appended\n", exePath)
 		os.Exit(1)
 	}
 
@@ -50,7 +50,7 @@ func getSourceDir(srcDir string) string {
 		if _, err := os.Stat(srcDir); err == nil {
 			return srcDir
 		}
-		fmt.Fprintf(os.Stderr, "ERROR: %s does not exist\n", srcDir)
+		_, _ = fmt.Fprintf(os.Stderr, "ERROR: %s does not exist\n", srcDir)
 		os.Exit(1)
 	}
 
@@ -69,7 +69,7 @@ func getSourceDir(srcDir string) string {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "ERROR: Could not find src directory")
+	_, _ = fmt.Fprintln(os.Stderr, "ERROR: Could not find src directory")
 	os.Exit(1)
 	return ""
 }
@@ -79,7 +79,7 @@ func parseTree(dir string, exePath string) {
 	exeName = strings.TrimSuffix(exeName, filepath.Ext(exeName))
 
 	fset := token.NewFileSet()
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if filepath.Ext(path) == ".go" {
 			file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 			if err != nil {
@@ -111,7 +111,7 @@ func handleComment(comment string, filePath string, exePath string) {
 
 		if _, err := os.Stat(dataDir); err != nil {
 			if _, err := os.Stat(dataDir2); err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: Neither the directory \"%s\" nor \"%s\" does exist\n", dataDir, dataDir2)
+				_, _ = fmt.Fprintf(os.Stderr, "ERROR: Neither the directory \"%s\" nor \"%s\" does exist\n", dataDir, dataDir2)
 				os.Exit(1)
 			}
 			dataDir = dataDir2
@@ -127,7 +127,7 @@ func handleComment(comment string, filePath string, exePath string) {
 
 		err := appendZipData(exePath, collectionName, dataDir, excludes)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: Could not append zip data: %s\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "ERROR: Could not append zip data: %s\n", err)
 			os.Exit(1)
 		}
 		fmt.Println()
@@ -141,8 +141,8 @@ func hasZipData(exePath string) bool {
 	}
 
 	data := make([]byte, 4)
-	file.Seek(-8, os.SEEK_END)
-	file.Read(data)
+	_, _ = file.Seek(-8, io.SeekEnd)
+	_, _ = file.Read(data)
 
 	return string(data) == "ZIPR"
 }
@@ -157,15 +157,17 @@ func appendZipData(exePath string, collectionName string, dataDir string, exclud
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
-	offset, err := file.Seek(0, os.SEEK_END)
+	offset, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
 		return err
 	}
 
-	file.WriteString(collectionName)
-	file.Write([]byte{0})
+	_, _ = file.WriteString(collectionName)
+	_, _ = file.Write([]byte{0})
 
 	zipWriter := zip.NewWriter(file)
 
@@ -180,7 +182,7 @@ func appendZipData(exePath string, collectionName string, dataDir string, exclud
 				return err
 			}
 
-			relPath := strings.TrimLeft(strings.TrimPrefix(path, dataDir), "/")
+			relPath := strings.TrimLeft(filepath.ToSlash(strings.TrimPrefix(path, dataDir)), "/")
 			include := true
 			for _, exclude := range excludes {
 				if exclude[0] == '/' && strings.HasPrefix(relPath, exclude[1:]) || strings.Contains(relPath, exclude) {
@@ -220,13 +222,13 @@ func appendZipData(exePath string, collectionName string, dataDir string, exclud
 	})
 
 	if err != nil {
-		zipWriter.Close()
+		_ = zipWriter.Close()
 		return err
 	}
 
-	zipWriter.Close()
-	file.WriteString("ZIPR")
-	binary.Write(file, binary.BigEndian, int32(offset))
+	_ = zipWriter.Close()
+	_, _ = file.WriteString("ZIPR")
+	_ = binary.Write(file, binary.BigEndian, int32(offset))
 
 	return nil
 }
