@@ -86,13 +86,10 @@ func parseTree(dir string, exePath string) {
 				return err
 			}
 
-			binaryName := filepath.Base(filepath.Dir(path))
-			if file.Name.Name != "main" || binaryName == exeName {
-				for _, s := range file.Comments {
-					for _, cmt := range s.List {
-						if strings.HasPrefix(cmt.Text, "//") {
-							handleComment(cmt.Text, path, exePath)
-						}
+			for _, s := range file.Comments {
+				for _, cmt := range s.List {
+					if strings.HasPrefix(cmt.Text, "//") {
+						handleComment(cmt.Text, path, exePath)
 					}
 				}
 			}
